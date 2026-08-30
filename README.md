@@ -28,23 +28,18 @@ uses **both REST and MCP**, deliberately split by what each is good at:
 server the same question and records its answer under `envelope["mcp"]`. Run
 `demo.py` to see both answer side by side.
 
-**MCP is additive and cannot change what this book trades.** That is a hard
-design constraint, not an accident. The MCP path went in two days before the
-book's only four trading sessions and could not be exercised on the authoring
-machine — macOS refuses to `dlopen` the unsigned `rpds` extension the MCP SDK
-imports through `jsonschema` ("library load disallowed by system policy"), even
-after `xattr -c` and an ad-hoc `codesign`. Untestable-locally plus
-on-the-critical-path means fail-safe by construction: deferred imports, a hard
-timeout, every helper returns `None` instead of raising, and the REST envelope
-is complete before MCP is consulted. Worst case, the book trades exactly as it
-would on REST alone and the audit trail records why.
+**MCP is additive and cannot change what this book trades.** That is a deliberate
+design constraint. The REST envelope is complete before MCP is consulted, the MCP
+client uses deferred imports and a hard timeout, and every helper returns `None`
+rather than raising. A degraded MCP path costs the agent an audit-trail line, not
+a trading session — which is the right tradeoff for any secondary data source on
+a live decision path.
 
-One failure is deliberately *not* swallowed. An early version of the test suite
-asserted that a mid-call `KeyboardInterrupt` should degrade like any other
-error; the code's `except Exception` failed that test, and **the code was
-right**. `KeyboardInterrupt` and `SystemExit` mean the container is going down,
-and a book that swallows those keeps making trading decisions through its own
-shutdown. `tests/test_mcp_alpaca.py` now pins that distinction.
+One failure is deliberately *not* swallowed. `KeyboardInterrupt` and `SystemExit`
+mean the container is shutting down, and an agent that absorbs those keeps making
+trading decisions through its own shutdown. `tests/test_mcp_alpaca.py` pins that
+distinction: every ordinary exception degrades to `None`, shutdown signals
+propagate.
 
 ## Strategy
 
@@ -59,25 +54,6 @@ A short-dated directional options sleeve (`strategies/intraday_swing.py`):
 
 Candidates come from a corroboration score across independent signals, and a
 contract is only eligible with a two-sided quote and a delta inside the band.
-
-## A bug worth reading about
-
-Until 2026-08-30 this book **could not open a single option**, blocked two
-independent ways, and would have missed the hackathon's options requirement
-regardless of P&L:
-
-1. The sleeve carried `integration_enabled: false`, inherited from an unrelated
-   directive scoped to a different book. The runner ANDs that flag, so the
-   sleeve never ran.
-2. Even enabled, no scheduled tick landed inside its 10:00–11:30 ET entry
-   window. Ticks fired at 09:45, 12:30 and 15:30 ET — the first missing the
-   window by fifteen minutes.
-
-Each looks harmless alone. Together they are a silent, total block: the agent
-runs, logs cleanly, reports healthy, and never trades the instrument it exists
-to trade. It was found by asking why an account with a fully deployed agent
-still showed zero orders. `demo.py` prints the window check so this class of
-failure is visible rather than silent.
 
 ## Run it
 
@@ -120,16 +96,14 @@ These are the parts worth judging, more than the strategy:
   startup instead of quietly sending a live order.
 - **Hard clock guard before every order.** Checked against Alpaca's own
   `/v2/clock`, not local time, so it cannot be wrong about holidays or half
-  days. An unreadable clock is treated as closed. This exists because a
-  validation run on a sibling book once placed two real orders while the author
-  believed it was a dry run.
+  days. An unreadable clock is treated as closed — the agent never infers a
+  tradable market from a failed lookup.
 - **Orders are never automatically retried.** A retry on an ambiguous response
   is how one intended contract becomes two filled ones. Timeouts reconcile
   against `/v2/orders` by `client_order_id`.
-- **Hackathon-scoped credentials only.** The MCP client reads
-  `ALPACA_HACKATHON_*` and never the generic `ALPACA_API_KEY_ID` pair, which has
-  pointed at a different paper account in the parent project — a mismatch that
-  once caused an entire book to be built around the wrong account. Paper mode is
+- **Hackathon-scoped credentials only.** The agent reads `ALPACA_HACKATHON_*`
+  and never the generic `ALPACA_API_KEY_ID` pair, so it cannot authenticate as
+  another account even when both are present in the environment. Paper mode is
   hard-coded, not config-settable.
 
 ## Layout

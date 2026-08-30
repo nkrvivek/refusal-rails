@@ -18,9 +18,8 @@ What it shows, in the order the agent does it:
      Alpaca integrations answering the same question.
   4. The contract the intraday_swing sleeve would select, with the delta band
      and entry window that governed the choice.
-  5. Whether the entry window is open right now, which is the gate that
-     silently blocked every option this book could have opened until
-     2026-08-30.
+  5. Whether the sleeve's entry window is open right now — the time gate that
+     governs when the agent is permitted to open at all.
 """
 
 from __future__ import annotations
@@ -63,16 +62,16 @@ def main(argv: list[str]) -> int:
     print(f"  next_open : {clock.get('next_open')}")
     print("  place_option_order() refuses to submit unless is_open is True.")
 
-    rule("3. ENTRY WINDOW — the gate that blocked every option until 2026-08-30")
+    rule("3. ENTRY WINDOW — when the agent is permitted to open")
     now_et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
     minutes = now_et.hour * 60 + now_et.minute
     inside = WINDOW_ET[0] <= minutes <= WINDOW_ET[1]
     print(f"  now (ET)      : {now_et:%Y-%m-%d %H:%M} ({now_et:%A})")
     print(f"  open window   : 10:00-11:30 ET")
     print(f"  inside window : {inside}")
-    print("  The book's opening tick runs 14:15 UTC = 10:15 ET, inside this window.")
-    print("  It ran at 13:45 UTC = 09:45 ET until 2026-08-30, 15 minutes early,")
-    print("  so the options sleeve could never open a position.")
+    print("  The opening tick runs 14:15 UTC = 10:15 ET, inside this window, so")
+    print("  the agent is scheduled to evaluate entries when it is allowed to take")
+    print("  them. A tick outside the window can only manage and exit.")
 
     for underlying in underlyings:
         rule(f"4. CHAIN FOR {underlying} — REST and MCP, side by side")
