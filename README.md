@@ -87,6 +87,50 @@ Sample output (real account, markets closed):
   NOT submitted — this script is read-only.
 ```
 
+## Day one, 2026-08-31
+
+Seven ticks, 06:46Z to 19:57Z. NAV $100,000.00 to $99,946.90.
+
+The swing sleeve reached its 10:15 ET entry window, had greeks, and selected
+four contracts inside its delta band: `XLF260903C00058000`,
+`TQQQ260902C00072000`, `AMD260902C00475000`, `TSLA260902C00365000`. Alpaca
+rejected all four:
+
+```
+422 {"code":42210000,"message":"limit price must be limited to 2 decimal places"}
+```
+
+The sleeve opened nothing on day one. That is the honest headline.
+
+Two defects were found and fixed the same day, both on the order path, and both
+in the private engine rather than in this transport:
+
+- **Snapshot requests were unbounded.** Alpaca's multi-symbol snapshot endpoint
+  answers `400 {"message":"symbol limit is 100"}` above 100 symbols, and the
+  greeks backfill was sending up to 1,138. Every batch failed, so the sleeve had
+  no delta data, would have found nothing selectable, and would have opened
+  nothing while logging a clean tick. Healthy-looking and completely inert is
+  the failure mode this whole repository is named after. Found by running a
+  dry-run tick against the deployed worker with the market closed, rather than
+  letting Monday's open be the first execution of the code.
+- **Limit prices carried float tails.** Fixed by formatting to a string, not by
+  `round()`: a rounded float still serialises as `1.2300000000000002`.
+
+`alpaca_rest.py` in this repository was already correct on both counts. It
+paginates one underlying at a time rather than batching symbols, and it has
+always sent `f"{float(limit_price):.2f}"`. `tests/test_order_submission.py` now
+pins that so it stays true.
+
+Two more defects were in the record rather than the order path, and they are the
+worse pair. The tick summary wrote `halts_opens: true` on the freshness gate for
+five of the seven ticks, when a freshness failure that halts returns before any
+summary is built, so the flag can never be true where it was written. And the
+placed-order counter read 0 on every tick of a day the book sent four legs to
+the broker, because the sleeve that opened them runs after the loop that
+increments the counter. An agent that misreports its own day is worse than one
+that has a bad day, because every downstream reader takes the record for the
+truth.
+
 ## Safety properties
 
 These are the parts worth judging, more than the strategy:
@@ -113,7 +157,7 @@ alpaca_rest.py               REST transport: orders, account, clock, chains
 mcp_alpaca.py                MCP transport: option chains and snapshots
 strategies/intraday_swing.py Entry window, delta band, contract selection
 demo.py                      Read-only walkthrough of the decision path
-tests/                       Fail-safety contract for the MCP path
+tests/                       Fail-safety contract for the MCP and order paths
 docs/rules-and-qa.md         Event rules + the full staffed Q&A transcript
 ```
 
