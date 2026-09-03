@@ -85,11 +85,20 @@ failed, and no legs go out. `tests/test_intraday_pop.py` pins both.
 ## Run it
 
 ```bash
+python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # add your Alpaca paper keys
-python demo.py SPY QQQ    # read-only: no orders are placed
+cp .env.example .env          # add your Alpaca paper keys
+set -a && . ./.env && set +a  # required: nothing here loads .env for you
+python demo.py SPY QQQ        # read-only: no orders are placed
 pytest -q
 ```
+
+The third line is not optional. No module in this repo calls `load_dotenv`;
+every credential is read straight off the process environment in
+`alpaca_rest.py` and `mcp_alpaca.py`. A `.env` you filled in but never sourced
+fails exactly like an unset key, with `Set ALPACA_HACKATHON_API_KEY_ID and
+ALPACA_HACKATHON_API_SECRET (see .env.example).` under section 1. That is the
+refusal working, not a bug, but the instructions used to walk you into it.
 
 `demo.py` issues only GETs. The single order-placing method in this repo is
 `AlpacaRest.place_option_order`, and the demo never reaches it.
