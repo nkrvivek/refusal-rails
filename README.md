@@ -158,6 +158,120 @@ increments the counter. An agent that misreports its own day is worse than one
 that has a bad day, because every downstream reader takes the record for the
 truth.
 
+## Day two, 2026-09-01
+
+NAV $99,949.79 to $96,737.40.
+
+The swing sleeve reached its window with working greeks and opened four long
+calls at 14:20Z: `MU260904C00947500` x2, `SPCX260904C00145000` x14,
+`AMZN260902C00255000` x23, `AXON260904C00545000` x3. The put-credit sleeve
+added three spreads on VZ, QQQ and SPY.
+
+One of the four was closed the same session:
+
+```
+16:33:53 intraday_swing_exit_signal  ret -0.5824  reason "stop_loss -58.2%<=-25%"
+```
+
+The stop is a threshold checked on a tick, not an order resting at the broker.
+Ticks run at 14:20Z and 16:30Z, so a position that crosses -25% at 14:35Z is
+not closed until the next tick sees it, at whatever it is worth by then. AXON
+was worth -58.2% when the check ran, and the sleeve took $1,845 out of a $2,665
+position on a rule written to cap the loss at a quarter.
+
+That is the honest reading of a polled stop, and it is worth stating plainly
+because the number that gets published is "-25% stop loss" while the number
+that gets paid is whatever the gap between two ticks allows. Nothing about the
+threshold was wrong. The refusal machinery in this repo fails closed on data it
+cannot read; a stop that only exists between ticks fails open on time, which is
+a different axis and one this book did not have covered.
+
+## Day three, 2026-09-02
+
+NAV $95,806.64 to $94,492.72, and the day the swing sleeve was switched off.
+
+Three of the four day-two calls closed: SPCX -$2,072, AMZN -$897, MU +$1,220.
+Realized on the sleeve was then far past what the rest of the book earns in a
+week, so entries were stopped rather than tuned. The knob was
+`intraday_swing.max_concurrent_picks: 4 -> 0`, not `integration_enabled:
+false`. The disabled flag skips the whole dispatch including exits, which would
+have left two open positions with nothing watching them until expiry. A kill
+switch that also stops the exits is not a kill switch.
+
+Three defects were found in the sleeve on the way out, and none were hot-fixed
+mid-run:
+
+- **The entry TTL was never enforced.** `VFC260904C00013500` was submitted at
+  14:20:39Z on a 0.14 limit with `entry_ttl_minutes: 25`, and filled at
+  16:24:54Z. It should have been cancelled at 14:45Z. It lived two hours and
+  four minutes, and filled into a setup that no longer existed.
+- **The same-day stop is suppressed by the PDT guard.** The runner skips a
+  same-day stop when there is no day-trade room. On a paper account the guard
+  is protecting nothing at all, and it costs the drawdown it was written to
+  prevent.
+- **Alpaca paper will not accept a stop on a long option.** A `stop` order on
+  `MU260904C00947500` answered
+  `403 {"code":40310000,"message":"account not eligible to trade uncovered option contracts"}`.
+  So the polled tick stop above is not one stop among several. It is the only
+  stop any options sleeve on this venue has. Anyone pointing an options agent
+  at Alpaca paper should know that before they design around a resting stop.
+
+## Day four, 2026-09-03, and the close
+
+NAV opened at $94,228.80 and the book was closed the same afternoon at
+**$111,303.62**, against a $100,000 base.
+
+**That result is not the sleeves.** The account also carried positions an
+operator entered directly, and they account for the gain and more. Read by
+sleeve over the four days, the code in this repository was down: the swing
+sleeve realized **-$6,443** across MU, AXON, SPCX, AMZN and VFC, and the
+put-credit sleeve made **+$640** across BAC, MO, VZ, QQQ and SPY. Publishing
+the book's +11.3% as agent performance would be the same class of error as
+day one's `n_placed: 0`, which is the failure this repository is named after.
+
+The pop sleeve was written, tested and committed this day, and **it never took
+a live tick.** Four deploy runs uploaded the worker version and pushed the
+container image, then died at the container-apply step:
+
+```
+The requested Worker version could not be found, please check the ID being
+passed and try again. [code: 100146]
+```
+
+The versions were listed by `wrangler versions list` while the deploy said they
+did not exist, the same wrangler had deployed the day before, and a local
+`deployments list` failed the same way against a version from two days earlier.
+The fault was the platform's, not the change's, and the honest consequence is
+that `strategies/intraday_pop.py` is a strategy this book reviewed and shipped
+but never ran.
+
+**The close.** The exit was a price, not a bell: flatten the book when the mid
+mark-to-market reached $112,000. It printed $112,664.97 and the flatten ran on
+its own, cancelling both stop children first, then buying back every short
+option leg, then selling the longs, then the equities. Shorts lead because the
+account answers 403 to any order that would leave an option uncovered even for
+an instant.
+
+One leg did not close. `MO261009P00060000`, the long wing of an October put
+spread, has a 0 bid and answered
+`403 {"code":40310000,"message":"order has been rejected due to no available quote for symbol. please reenter with a limit"}`
+on a market order. It is marked at $0, carries no obligation, and a resting
+0.01 limit is the only exit it has. A book is not flat because the flatten
+script returned 0; it is flat when the position list is empty, and this one
+is not.
+
+## Results
+
+| Day | NAV close | What moved it |
+|---|---|---|
+| 2026-08-31 | $99,946.90 | two put credit spreads opened; swing rejected on limit precision |
+| 2026-09-01 | $96,737.40 | four swing calls opened, one stopped at -58.2% |
+| 2026-09-02 | $94,492.72 | three swing calls closed at a loss; sleeve switched off |
+| 2026-09-03 | $111,303.62 | book flattened at target; the gain is not the sleeves |
+
+Sleeve-level over the four days: swing **-$6,443**, put credit spreads
+**+$640**, pop **never ran**.
+
 ## Safety properties
 
 These are the parts worth judging, more than the strategy:
