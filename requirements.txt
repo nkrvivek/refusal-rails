@@ -1,4 +1,8 @@
 requests>=2.31.0
-alpaca-mcp-server>=2.3.0
-mcp>=1.29.0
+alpaca-mcp-server>=2.3.0,<3
+mcp>=1.29.0,<2
+# alpaca-mcp-server 2.3.1 requires fastmcp<4. Without this pin a fresh install
+# resolves fastmcp 4.x and every MCP call dies on
+# ModuleNotFoundError: No module named 'fastmcp.tools.tool' (measured 2026-09-03).
+fastmcp>=3.1.0,<4
 pytest>=7.0.0

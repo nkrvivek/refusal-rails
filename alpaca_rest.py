@@ -29,6 +29,11 @@ PAPER_HOST = "paper-api.alpaca.markets"
 DATA_HOST = "https://data.alpaca.markets"
 DEFAULT_TIMEOUT_S = 20.0
 
+# The literal values shipped in .env.example. They are non-empty, so the
+# missing-credential check below waves them through and Alpaca answers 401 with
+# nothing naming the cause. Refuse them by name instead.
+ENV_EXAMPLE_PLACEHOLDERS = frozenset({"your_paper_key_id", "your_paper_secret"})
+
 
 class AlpacaRestError(RuntimeError):
     """Any non-2xx answer from Alpaca, with the body kept for the audit trail."""
@@ -54,7 +59,17 @@ class AlpacaRest:
                 "Set ALPACA_HACKATHON_API_KEY_ID and ALPACA_HACKATHON_API_SECRET "
                 "(see .env.example).",
             )
+        self._require_real_credentials()
         self._require_paper()
+
+    def _require_real_credentials(self) -> None:
+        """Refuse the .env.example placeholders before they earn a bare 401."""
+        if ENV_EXAMPLE_PLACEHOLDERS & {self.key_id, self.secret_key}:
+            raise AlpacaRestError(
+                "The .env.example placeholder is still in the environment. Put "
+                "your real paper keys in .env, then source it in this shell: "
+                "set -a && . ./.env && set +a",
+            )
 
     def _require_paper(self) -> None:
         host = urlparse(self.base_url).hostname or ""
@@ -198,13 +213,25 @@ class AlpacaRest:
             return {"ok": False, "status": f"import_error:{type(exc).__name__}"}
         result = mcp_alpaca.get_option_chain(underlying, expiration)
         contracts = 0
+        paged = False
         if isinstance(result, dict):
+            # The server wraps its payload in a "data" envelope alongside its own
+            # security block, so the counted keys live one level down. Scanning
+            # only the top level reported 0 contracts on a healthy ok response
+            # (measured 2026-09-03), which reads on screen as a dead MCP path.
+            payload = result.get("data") if isinstance(result.get("data"), dict) else result
             for key in ("snapshots", "contracts", "chain", "options"):
-                value = result.get(key)
+                value = payload.get(key)
                 if isinstance(value, (dict, list)):
                     contracts = len(value)
                     break
-        return {"ok": result is not None, "status": mcp_alpaca.LAST_STATUS, "contracts": contracts}
+            paged = bool(payload.get("next_page_token"))
+        return {
+            "ok": result is not None,
+            "status": mcp_alpaca.LAST_STATUS,
+            "contracts": contracts,
+            "paged": paged,
+        }
 
     # ---- orders ----------------------------------------------------------
 

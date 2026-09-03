@@ -140,3 +140,32 @@ def test_a_live_endpoint_is_refused_at_construction(monkeypatch):
     monkeypatch.setenv("ALPACA_HACKATHON_API_SECRET", "test-secret")
     with pytest.raises(AlpacaRestError):
         AlpacaRest(base_url="https://api.alpaca.markets")
+
+
+def test_the_env_example_placeholder_is_refused_at_construction(monkeypatch):
+    """A filled .env that was never sourced looks exactly like an unset key.
+
+    Measured 2026-09-03. ``cp .env.example .env`` leaves the literal
+    ``your_paper_key_id`` in the environment. It is a non-empty string, so the
+    missing-credential check passes it through and the first GET comes back
+    ``401 {"message": "unauthorized."}`` with nothing naming the cause. The
+    placeholder is a known value; refuse it by name instead.
+    """
+    monkeypatch.setenv("ALPACA_HACKATHON_API_KEY_ID", "your_paper_key_id")
+    monkeypatch.setenv("ALPACA_HACKATHON_API_SECRET", "your_paper_secret")
+    with pytest.raises(AlpacaRestError) as exc:
+        AlpacaRest()
+    assert ".env" in str(exc.value)
+
+
+def test_a_placeholder_in_either_half_is_enough_to_refuse(monkeypatch):
+    monkeypatch.setenv("ALPACA_HACKATHON_API_KEY_ID", "PKREALLOOKINGKEY")
+    monkeypatch.setenv("ALPACA_HACKATHON_API_SECRET", "your_paper_secret")
+    with pytest.raises(AlpacaRestError):
+        AlpacaRest()
+
+
+def test_a_real_looking_pair_still_constructs(monkeypatch):
+    monkeypatch.setenv("ALPACA_HACKATHON_API_KEY_ID", "PKREALLOOKINGKEY")
+    monkeypatch.setenv("ALPACA_HACKATHON_API_SECRET", "arealsecretvalue")
+    assert AlpacaRest().key_id == "PKREALLOOKINGKEY"

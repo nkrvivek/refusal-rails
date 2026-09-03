@@ -89,7 +89,8 @@ def main(argv: list[str]) -> int:
         print(f"  REST contracts  : {len(calls)} calls / {len(chain['puts'])} puts")
         mcp = envelope.get("mcp") or {}
         print(f"  MCP status      : {mcp.get('status')}")
-        print(f"  MCP contracts   : {mcp.get('contracts')}")
+        page_note = " (first page)" if mcp.get("paged") else ""
+        print(f"  MCP contracts   : {mcp.get('contracts')}{page_note}")
         if not mcp.get("ok"):
             print("  (MCP unavailable here → REST result stands. The agent is")
             print("   designed so a dead MCP path cannot change what it trades.)")
