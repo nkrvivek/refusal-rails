@@ -412,7 +412,6 @@ strategies/intraday_pop.py   Day-move trigger, flow confirmation, cap-only sizin
 demo.py                      Read-only walkthrough of the decision path
 tests/                       Fail-safety contract for the MCP and order paths
 docs/rules-and-qa.md         Event rules + the full staffed Q&A transcript
-docs/demo-video.md           Demo script and shot list, under five minutes
 ```
 
 This repository is cut fresh for the event. The agent runs inside a larger
