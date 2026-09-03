@@ -14,6 +14,7 @@ before the code, and each is a refusal rather than an entry:
 from __future__ import annotations
 
 from strategies.intraday_pop import (
+    close_out_reachable,
     GATE_INSTRUMENT,
     IntradayPopConfig,
     confirm_flow,
@@ -160,3 +161,29 @@ def test_atm_call_takes_the_nearest_expiry_then_the_strike_at_or_below_spot():
     ]
     assert pick_atm_call(rows, spot=102.0)["sym"] == "at"
     assert pick_atm_call([], spot=102.0) is None
+
+
+# --------------------------------------------------------------------------
+# A leg is only opened on a day the sleeve can also close it
+# --------------------------------------------------------------------------
+
+def _cfg_days(days):
+    raw = {"intraday_pop": {"enabled": True, "close_out_weekdays": days}}
+    return IntradayPopConfig.from_cfg(raw)
+
+
+def test_close_out_reachable_on_a_day_the_flatten_tick_runs():
+    cfg = _cfg_days([1, 2, 3, 4])
+    assert close_out_reachable(3, cfg) is True  # Wednesday
+
+
+def test_close_out_unreachable_on_a_day_with_no_flatten_tick():
+    """The 15:45 ET cron is the only exit a long call has. On a weekday it does
+    not run, opening a position is opening one nothing will close."""
+    cfg = _cfg_days([1, 2, 3, 4])
+    assert close_out_reachable(5, cfg) is False  # Friday
+
+
+def test_close_out_weekdays_defaults_to_the_full_week():
+    cfg = IntradayPopConfig.from_cfg({"intraday_pop": {"enabled": True}})
+    assert all(close_out_reachable(d, cfg) for d in (1, 2, 3, 4, 5))

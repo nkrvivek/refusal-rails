@@ -76,6 +76,7 @@ class IntradayPopConfig:
     options_cap_usd: float
     entry_window: tuple[int, int]
     close_out_minutes: int
+    close_out_weekdays: frozenset[int]
     min_day_move_pct: float
     max_flow_lookups: int
     min_call_put_ratio: float
@@ -99,6 +100,8 @@ class IntradayPopConfig:
             options_cap_usd=float(raw.get("options_cap_usd", 0) or 0),
             entry_window=(_hhmm_to_minutes(start), _hhmm_to_minutes(end)),
             close_out_minutes=_hhmm_to_minutes(raw.get("close_out_et", "15:45")),
+            close_out_weekdays=frozenset(
+                int(d) for d in raw.get("close_out_weekdays", (1, 2, 3, 4, 5))),
             min_day_move_pct=float(raw.get("min_day_move_pct", 5.0)),
             max_flow_lookups=int(raw.get("max_flow_lookups", 5)),
             min_call_put_ratio=float(raw.get("min_call_put_ratio", 2.0)),
@@ -277,6 +280,19 @@ def in_entry_window(now_et_minutes: int, cfg: IntradayPopConfig) -> bool:
 
 def close_out_due(now_et_minutes: int, cfg: IntradayPopConfig) -> bool:
     return now_et_minutes >= cfg.close_out_minutes
+
+
+def close_out_reachable(iso_weekday: int, cfg: IntradayPopConfig) -> bool:
+    """Does a close-out tick run on this weekday (1=Mon .. 7=Sun)?
+
+    The long call cannot carry a stop, since Alpaca rejects one outright, so
+    close_out_et tick is the ONLY exit it has. On a day the worker has no such
+    tick, opening a position means opening one nothing will close. The
+    hackathon book runs Mon-Thu by design, so Friday is genuinely empty rather
+    than misconfigured, and the sleeve has to stand aside rather than trust a
+    tick that is not coming.
+    """
+    return iso_weekday in cfg.close_out_weekdays
 
 
 def pick_atm_call(rows: Sequence[Mapping[str, Any]], spot: float) -> Mapping[str, Any] | None:
