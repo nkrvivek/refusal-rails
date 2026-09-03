@@ -43,7 +43,11 @@ propagate.
 
 ## Strategy
 
-A short-dated directional options sleeve (`strategies/intraday_swing.py`):
+Two sleeves, both short-dated and both flat by the close.
+
+### Swing (`strategies/intraday_swing.py`)
+
+A short-dated directional options sleeve:
 
 - **Instrument:** long single-leg options only, no short premium.
 - **Expiry:** 1–3 DTE.
@@ -54,6 +58,29 @@ A short-dated directional options sleeve (`strategies/intraday_swing.py`):
 
 Candidates come from a corroboration score across independent signals, and a
 contract is only eligible with a two-sided quote and a delta inside the band.
+
+### Pop (`strategies/intraday_pop.py`)
+
+A name already up hard on the day, taken as shares with a stop attached at
+entry plus the nearest-expiry at-the-money call:
+
+- **Trigger:** at least 5% on the day, measured against the previous close.
+- **Confirmation:** call/put ratio at or above 2.0 on at least 20 calls, and a
+  dark pool that is not distributing.
+- **Entry window:** 10:00-11:30 ET, one entry a day, never while a position is
+  already open.
+- **Stop:** the higher of the day's open and entry less 3%, attached to the
+  equity order as an OTO child rather than watched by the runner.
+- **Market gate:** SPY inside a 0.6% band, VIX at or below 22, regime not
+  blocked. Every input it cannot read blocks the open.
+- **Close-out:** a dedicated 15:45 ET tick flattens both legs.
+
+This is the sleeve where a sizing bug is most expensive, because the entry is
+into a move that has already happened. So sizing reads two config dollar caps
+and nothing from the account: a live buying-power field moves inside a tick and
+would size the position off whatever the broker happened to report at that
+instant. A stop that lands at or above the entry is read as a pop that already
+failed, and no legs go out. `tests/test_intraday_pop.py` pins both.
 
 ## Run it
 
@@ -156,6 +183,7 @@ These are the parts worth judging, more than the strategy:
 alpaca_rest.py               REST transport: orders, account, clock, chains
 mcp_alpaca.py                MCP transport: option chains and snapshots
 strategies/intraday_swing.py Entry window, delta band, contract selection
+strategies/intraday_pop.py   Day-move trigger, flow confirmation, cap-only sizing
 demo.py                      Read-only walkthrough of the decision path
 tests/                       Fail-safety contract for the MCP and order paths
 docs/rules-and-qa.md         Event rules + the full staffed Q&A transcript
