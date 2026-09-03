@@ -32,8 +32,8 @@ server the same question and records its answer under `envelope["mcp"]`. Run
 design constraint. The REST envelope is complete before MCP is consulted, the MCP
 client uses deferred imports and a hard timeout, and every helper returns `None`
 rather than raising. A degraded MCP path costs the agent an audit-trail line, not
-a trading session — which is the right tradeoff for any secondary data source on
-a live decision path.
+a trading session, which is the right tradeoff for any secondary data source
+on a live decision path.
 
 One failure is deliberately *not* swallowed. `KeyboardInterrupt` and `SystemExit`
 mean the container is shutting down, and an agent that absorbs those keeps making
@@ -216,49 +216,149 @@ mid-run:
   stop any options sleeve on this venue has. Anyone pointing an options agent
   at Alpaca paper should know that before they design around a resting stop.
 
-## Day four, 2026-09-03, and the close
+## Day four, 2026-09-03: the close, the override, and the sleeve's live record
 
-NAV opened at $94,228.80 and the book was closed the same afternoon at
-**$111,303.62**, against a $100,000 base.
+Thursday was the book's last trading day. The ticks run `2-5` on Cloudflare's
+day numbering, which is Monday to Thursday, so nothing in this agent fires
+again after 19:45Z on the 3rd.
+
+### The morning close
+
+NAV opened at $94,228.80. The exit was a price, not a bell: flatten when the mid
+mark-to-market reached $112,000. It printed $112,664.97 and the flatten ran on
+its own, cancelling both stop children first, then buying back every short
+option leg, then selling the longs, then the equities. Shorts lead because the
+account answers 403 to any order that would leave an option uncovered even for
+an instant. The book was flat at **$111,303.62**, +11.30% on a $100,000 base.
 
 **That result is not the sleeves.** The account also carried positions an
 operator entered directly, and they account for the gain and more. Read by
 sleeve over the four days, the code in this repository was down: the swing
 sleeve realized **-$6,443** across MU, AXON, SPCX, AMZN and VFC, and the
 put-credit sleeve made **+$640** across BAC, MO, VZ, QQQ and SPY. Publishing
-the book's +11.3% as agent performance would be the same class of error as
-day one's `n_placed: 0`, which is the failure this repository is named after.
+the book's +11.3% as agent performance would be the same class of error as day
+one's `n_placed: 0`, which is the failure this repository is named after.
 
-The pop sleeve was written, tested and committed this day, and **it never took
-a live tick.** Four deploy runs uploaded the worker version and pushed the
-container image, then died at the container-apply step:
+### The pop sleeve's entire live record is two refusals
+
+`strategies/intraday_pop.py` was written, reviewed and committed this day. It
+reached the running container late, and its whole live history is two audit
+rows, both from the last hour of the last session:
+
+```
+19:34:42Z intraday_pop_ran  opened 0  skips ["outside entry window"]
+19:49:11Z intraday_pop_ran  opened 0  skips ["outside entry window"]
+```
+
+It never opened a live position, and under the Monday-to-Thursday cron it never
+will. The only tick of the day that fell inside the sleeve's 10:00-11:30 ET
+entry window started at 14:16Z, and the sleeve was committed at 14:44Z, twenty
+eight minutes too late.
+
+There is a second gap worth naming rather than smoothing over. The 16:30Z tick
+reported commit `2f2c6d3`, which does contain the sleeve and its config block,
+and it logged no pop row at all. The likeliest reading is the failure this repo
+already hit four times today: a deploy uploads the worker version, stamps the
+commit, and then dies at the container-apply step.
 
 ```
 The requested Worker version could not be found, please check the ID being
 passed and try again. [code: 100146]
 ```
 
-The versions were listed by `wrangler versions list` while the deploy said they
-did not exist, the same wrangler had deployed the day before, and a local
-`deployments list` failed the same way against a version from two days earlier.
-The fault was the platform's, not the change's, and the honest consequence is
-that `strategies/intraday_pop.py` is a strategy this book reviewed and shipped
-but never ran.
+The worker's reported commit and the image actually serving the tick can
+disagree, and the reported one is the optimistic half. Stated as an inference,
+not a measurement: the image digest for that tick was not captured, which is
+itself the defect. Later runs of the same script went green with no change to
+the repository, so `100146` is a platform-side transient at the versions API.
 
-**The close.** The exit was a price, not a bell: flatten the book when the mid
-mark-to-market reached $112,000. It printed $112,664.97 and the flatten ran on
-its own, cancelling both stop children first, then buying back every short
-option leg, then selling the longs, then the equities. Shorts lead because the
-account answers 403 to any order that would leave an option uncovered even for
-an instant.
+### The override
 
-One leg did not close. `MO261009P00060000`, the long wing of an October put
-spread, has a 0 bid and answered
-`403 {"code":40310000,"message":"order has been rejected due to no available quote for symbol. please reenter with a limit"}`
-on a market order. It is marked at $0, carries no obligation, and a resting
-0.01 limit is the only exit it has. A book is not flat because the flatten
-script returned 0; it is flat when the position list is empty, and this one
-is not.
+The book was flat at $111,303.62 by lunchtime with two hours of session left,
+and the operator asked to redeploy it.
+
+**The sleeve was run against its own code first, and it refused.** Two of its
+three market gates were closed:
+
+| Gate | Reading | Verdict |
+|---|---|---|
+| `in_entry_window` | 13:47 ET against a 10:00-11:30 window | refuse |
+| `open_gate` (SPY band) | SPY +1.05% against a 0.6% band | refuse |
+| VIX cap | 14.49 against a 22.0 cap | pass |
+
+The scan found 14 names over the 5% day-move floor. Its own top candidate,
+SNOW at +20.30%, was killed by the sleeve's own stop rule: the day's open of
+380.35 sat above the ask of 369.28, which the code reads as a pop that already
+failed. The recommendation was to stand aside, and the reason was named:
+buying a name up 16% at 13:47 ET into a tape up 1% is the chase both closed
+gates exist to prevent.
+
+The operator directed the trade anyway. That is their call, and it is recorded
+here as an **override, not a sleeve result**. Three departures from the sleeve's
+own rules, each of them deliberate and each sized down rather than at cap:
+
+- It opens exactly one name a day. This took three.
+- RIOT and PLTR went in at half and 60% of the equity cap.
+- `confirm_flow`, the call/put and dark pool confirmation, never ran at all,
+  because the entry window was already shut before it would have been reached.
+
+The one rule carried over intact was the exit. Long option legs cannot carry a
+resting stop on this venue, so the only exit is time, and the sleeve's own
+`close_out_et` of 15:45 ET flattened everything.
+
+| Leg | In | Out | P&L |
+|---|---|---|---|
+| HOOD 200 sh | 124.47 | 123.5194 | -$190.12 |
+| `HOOD260904C00124000` x79 | 2.48 | 1.95 | **-$4,187.00** |
+| RIOT 601 sh | 20.77 | 21.06 | +$174.29 |
+| `RIOT260904C00020500` x105 | 0.60 | 0.68 | +$840.00 |
+| PLTR 81 sh | 183.00 | 182.95 | -$4.05 |
+| `PLTR260904C00182500` x29 | 2.67 | 2.63 | -$116.00 |
+| `SPY260904C00772000` x36 | 2.70 | 2.88 | +$648.00 |
+| **Total** | | | **-$2,834.88** |
+
+Equity went $111,303.62 to **$108,456.28**, a loss of $2,847.34 or 2.56%. The
+$12 difference between the leg total and the equity change is fees and the one
+leg that did not close.
+
+The HOOD call was the entire loss and then some: the other three names netted
++$1,542.24 between them. HOOD was the one name where the trade took both the
+shares and the calls at full size, and it was the one name the sleeve would
+have picked first, so the override is not the only thing being scored here. A
+profitable override would not have made the gates wrong, and a losing one does
+not make them right on its own. What it does show is the cost of the specific
+departure: size concentrated in the leverage leg of the name that faded.
+
+### One leg did not close
+
+`MO261009P00060000`, the long wing of an October put spread, has a 0 bid and
+answered
+
+```
+403 {"code":40310000,"message":"order has been rejected due to no available
+quote for symbol. please reenter with a limit"}
+```
+
+on a market order. The limit fallback found no bid either. It is marked at $0,
+carries no obligation and no assignment exposure, and a resting 0.01 limit is
+the only exit it has. A book is not flat because the flatten script returned 0.
+It is flat when the position list is empty, and this one is not. The script
+printed `NOT FLAT` and named the leg rather than reporting a clean exit.
+
+### The operational finding
+
+The 15:45 ET flatten was owned by a watcher running inside an agent session,
+and that session's task was killed twice, once with 34 minutes still to run.
+Had it stayed there, the flatten would simply never have fired and eight legs
+would have carried into a Friday with no engine tick. Relaunching it detached,
+so that it was re-parented to the init process, survived a second kill that
+took the reporting task with it.
+
+**A session-scoped watcher is not a rail.** Everything else in this repository
+fails closed on data it cannot read. An exit that depends on a process nobody
+guarantees is alive fails open on infrastructure, which is a third axis after
+day two's fail-open-on-time. Any unattended exit that matters belongs in cron
+or in the container, not in a session.
 
 ## Results
 
@@ -267,10 +367,21 @@ is not.
 | 2026-08-31 | $99,946.90 | two put credit spreads opened; swing rejected on limit precision |
 | 2026-09-01 | $96,737.40 | four swing calls opened, one stopped at -58.2% |
 | 2026-09-02 | $94,492.72 | three swing calls closed at a loss; sleeve switched off |
-| 2026-09-03 | $111,303.62 | book flattened at target; the gain is not the sleeves |
+| 2026-09-03 | $108,456.28 | flat at $111,303.62 at the target, then a manual override gave back $2,847.34 |
 
-Sleeve-level over the four days: swing **-$6,443**, put credit spreads
-**+$640**, pop **never ran**.
+Final equity **$108,456.28** against a $100,000 base, +8.46%.
+
+Attribution, which is the only number worth publishing:
+
+| Source | Realized |
+|---|---|
+| swing sleeve | **-$6,443** |
+| put credit spread sleeve | **+$640** |
+| pop sleeve | **never opened a position** |
+| operator trades and the override | the remainder |
+
+The agent's sleeves lost money over four sessions. The account made money. Those
+are two different sentences and this README will not merge them.
 
 ## Safety properties
 
@@ -281,7 +392,7 @@ These are the parts worth judging, more than the strategy:
   startup instead of quietly sending a live order.
 - **Hard clock guard before every order.** Checked against Alpaca's own
   `/v2/clock`, not local time, so it cannot be wrong about holidays or half
-  days. An unreadable clock is treated as closed — the agent never infers a
+  days. An unreadable clock is treated as closed, so the agent never infers a
   tradable market from a failed lookup.
 - **Orders are never automatically retried.** A retry on an ambiguous response
   is how one intended contract becomes two filled ones. Timeouts reconcile
@@ -301,6 +412,7 @@ strategies/intraday_pop.py   Day-move trigger, flow confirmation, cap-only sizin
 demo.py                      Read-only walkthrough of the decision path
 tests/                       Fail-safety contract for the MCP and order paths
 docs/rules-and-qa.md         Event rules + the full staffed Q&A transcript
+docs/demo-video.md           Demo script and shot list, under five minutes
 ```
 
 This repository is cut fresh for the event. The agent runs inside a larger
