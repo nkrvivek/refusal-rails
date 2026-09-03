@@ -58,6 +58,31 @@ MCP_TIMEOUT_S = float(os.environ.get("ALPACA_MCP_TIMEOUT_S", "45"))
 # taking the README's word for it.
 LAST_STATUS: str = "not_attempted"
 
+# The MCP server is FastMCP, which greets every spawn with a boxed banner, an
+# "Update available" notice and an INFO line naming its transport, all on
+# stderr. The child inherits this process's stderr, so those three land in the
+# middle of the demo output and read as this book's own. Silence them in the
+# child's environment rather than swallowing its stderr, so a real server error
+# still reaches the terminal. Measured 2026-09-03.
+# FASTMCP_CHECK_FOR_UPDATES takes 'stable' | 'prerelease' | 'off', NOT a
+# boolean. "false" fails the server's own settings validation at import and
+# kills the process, which this module then reports as
+# error:get_option_chain:ExceptionGroup — a silenced banner that silently costs
+# the MCP path. Measured 2026-09-03.
+QUIET_SERVER_ENV = {
+    "FASTMCP_SHOW_SERVER_BANNER": "false",
+    "FASTMCP_CHECK_FOR_UPDATES": "off",
+    "FASTMCP_LOG_LEVEL": "ERROR",
+}
+
+
+def _server_env() -> dict[str, str] | None:
+    """Environment for the child server, or None when credentials are missing."""
+    creds = _credentials()
+    if creds is None:
+        return None
+    return {**os.environ, **creds, **QUIET_SERVER_ENV}
+
 
 def _server_command() -> list[str] | None:
     """Locate the alpaca-mcp-server entry point.
@@ -102,8 +127,8 @@ async def _call_tool_async(tool: str, arguments: dict[str, Any]) -> Any:
     from mcp import ClientSession, StdioServerParameters  # deferred: see docstring
     from mcp.client.stdio import stdio_client
 
-    creds = _credentials()
-    if creds is None:
+    env = _server_env()
+    if env is None:
         raise RuntimeError("ALPACA_HACKATHON_API_KEY_ID/SECRET not set")
 
     command = _server_command()
@@ -113,7 +138,7 @@ async def _call_tool_async(tool: str, arguments: dict[str, Any]) -> Any:
     params = StdioServerParameters(
         command=command[0],
         args=command[1:],
-        env={**os.environ, **creds},
+        env=env,
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:

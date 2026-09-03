@@ -118,3 +118,31 @@ def test_empty_inputs_short_circuit_before_spawning(monkeypatch):
     monkeypatch.setattr(mcp_alpaca, "call_tool", fail)
     assert mcp_alpaca.get_option_snapshot([]) is None
     assert mcp_alpaca.get_option_chain("") is None
+
+
+def test_the_child_server_is_told_to_stay_quiet(monkeypatch):
+    """The server's own banner lands in the middle of the demo output.
+
+    FastMCP prints a boxed banner and an update-available notice to stderr on
+    every spawn, plus an INFO line naming its transport. The child inherits this
+    process's stderr, so all three appear between demo sections and read as
+    output from this book. Measured 2026-09-03. Turn them off in the child's
+    environment rather than swallowing its stderr, so a real server error still
+    reaches the terminal.
+    """
+    monkeypatch.setenv("ALPACA_HACKATHON_API_KEY_ID", "PKTEST")
+    monkeypatch.setenv("ALPACA_HACKATHON_API_SECRET", "sectest")
+    env = mcp_alpaca._server_env()
+    assert env["FASTMCP_SHOW_SERVER_BANNER"] == "false"
+    # 'off', not "false": this setting is a three-way literal and a boolean
+    # string fails the server's settings validation at import, taking the whole
+    # MCP path down behind a quiet banner.
+    assert env["FASTMCP_CHECK_FOR_UPDATES"] == "off"
+    assert env["FASTMCP_LOG_LEVEL"] == "ERROR"
+    assert env["ALPACA_API_KEY"] == "PKTEST"
+
+
+def test_no_credentials_means_no_child_environment(monkeypatch):
+    monkeypatch.delenv("ALPACA_HACKATHON_API_KEY_ID", raising=False)
+    monkeypatch.delenv("ALPACA_HACKATHON_API_SECRET", raising=False)
+    assert mcp_alpaca._server_env() is None
